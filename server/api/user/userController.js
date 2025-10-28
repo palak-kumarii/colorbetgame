@@ -4,11 +4,26 @@ require("dotenv").config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// ✅ Helper to generate unique account number
+const generateAccountNumber = async() => {
+    let accountNumber;
+    let exists = true;
+
+    while (exists) {
+        accountNumber = "ACCT" + Math.floor(100000 + Math.random() * 900000);
+        const user = await User.findOne({ accountNumber });
+        if (!user) exists = false;
+    }
+
+    return accountNumber;
+};
+
 // ✅ Create a new user
 const createUser = async(req, res) => {
     try {
-        const { name, phone, walletBalance = 0, isAdmin = false } = req.body;
+        const { name, phone, walletBalance = 0, isAdmin = false, accountNumber } = req.body;
 
+        // Check if user already exists
         const existingUser = await User.findOne({ phone });
         if (existingUser) {
             return res.json({
@@ -18,10 +33,28 @@ const createUser = async(req, res) => {
             });
         }
 
+        // Use provided accountNumber or generate a new one
+        let finalAccountNumber = accountNumber;
+        if (!finalAccountNumber) {
+            finalAccountNumber = await generateAccountNumber();
+        } else {
+            // Check if provided account number is unique
+            const exists = await User.findOne({ accountNumber: finalAccountNumber });
+            if (exists) {
+                return res.json({
+                    status: 400,
+                    success: false,
+                    message: "Provided account number already exists",
+                });
+            }
+        }
+
         const user = new User({
             name,
             phone,
             walletBalance,
+            accountNumber: finalAccountNumber,
+            accountBalance: 0,
             isAdmin,
         });
 
@@ -91,10 +124,10 @@ const getUserById = async(req, res) => {
 // ✅ Update user
 const updateUser = async(req, res) => {
     try {
-        const { id, name, walletBalance, isAdmin } = req.body;
+        const { id, name, walletBalance, accountBalance, isAdmin } = req.body;
 
         const user = await User.findByIdAndUpdate(
-            id, { name, walletBalance, isAdmin }, { new: true, runValidators: true }
+            id, { name, walletBalance, accountBalance, isAdmin }, { new: true, runValidators: true }
         );
 
         if (!user)
@@ -155,7 +188,6 @@ const loginUser = async(req, res) => {
         user.otp = otp;
         await user.save();
 
-        // For testing only, return OTP directly
         res.status(200).json({ success: true, message: "OTP sent to phone", otp });
     } catch (error) {
         res.status(500).json({

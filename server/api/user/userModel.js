@@ -1,20 +1,22 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
+
+const betHistorySchema = new mongoose.Schema({
+    betId: { type: String },
+    type: { type: String }, // deposit / withdraw / bet / win
+    amount: { type: Number },
+    wonAmount: { type: Number, default: 0 },
+    timestamp: { type: Date, default: Date.now },
+});
 
 const userSchema = new mongoose.Schema({
-    name: { type: String, required: false },
+    name: { type: String },
     phone: { type: String, required: true, unique: true },
+    walletBalance: { type: Number, default: 0 }, // in-app wallet
+    accountNumber: { type: String, unique: true, sparse: true }, // virtual bank account
+    accountBalance: { type: Number, default: 0 }, // withdrawn/real account balance
+    isAdmin: { type: Boolean, default: false },
     otp: { type: String, default: null },
-    walletBalance: { type: Number, default: 0 },
-    reservedBalance: { type: Number, default: 0 },
-    betsHistory: [{
-        betId: { type: String },
-        color: { type: String },
-        amount: { type: Number },
-        wonAmount: { type: Number, default: 0 },
-        timestamp: { type: Date, default: Date.now },
+    betsHistory: [betHistorySchema],
+});
 
-    }],
-    isAdmin: { type: Boolean, default: false }
-}, { timestamps: true });
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model("User", userSchema);

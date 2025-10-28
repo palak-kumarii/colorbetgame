@@ -1,4 +1,15 @@
 const User = require("../user/userModel");
+const mongoose = require("mongoose");
+
+
+const transactionSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    type: { type: String, enum: ["deposit", "withdraw"], required: true },
+    amount: { type: Number, required: true },
+    date: { type: Date, default: Date.now },
+});
+
+const Transaction = mongoose.models.WalletTransaction || mongoose.model("Transaction", transactionSchema);
 
 
 const getWalletBalance = async(req, res) => {
@@ -10,49 +21,111 @@ const getWalletBalance = async(req, res) => {
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
         res.json({
-            status: 200,
             success: true,
             walletBalance: user.walletBalance,
+            accountBalance: user.accountBalance,
+            accountNumber: user.accountNumber,
         });
-    } catch (err) {
-        console.error("Get Wallet Error:", err);
-        res.status(500).json({ success: false, message: "Server error", error: err.message });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
     }
 };
-
 
 const addBalance = async(req, res) => {
     try {
         const { userId, amount } = req.body;
-
-        if (!userId) return res.status(400).json({ success: false, message: "userId required" });
-        if (!amount || isNaN(amount) || Number(amount) <= 0) {
-            return res.status(400).json({ success: false, message: "Invalid amount" });
-        }
+        if (!userId || !amount || Number(amount) <= 0)
+            return res.status(400).json({ success: false, message: "Invalid userId or amount" });
 
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        user.walletBalance += Number(amount);
+        const depositAmount = Number(amount);
+        user.walletBalance += depositAmount;
+
+
         user.betsHistory.push({
             betId: "deposit_" + Date.now(),
-            walletBalance: "deposit",
-            amount: Number(amount),
+            type: "deposit",
+            amount: depositAmount,
             wonAmount: 0,
             timestamp: new Date(),
         });
 
         await user.save();
 
+        const transaction = new Transaction({ userId, type: "deposit", amount: depositAmount });
+        await transaction.save();
+
         res.json({
-            status: 200,
             success: true,
-            message: "Funds added successfully",
+            message: "Deposit successful",
             walletBalance: user.walletBalance,
+            transaction,
         });
-    } catch (err) {
-        console.error("Add Funds Error:", err);
-        res.status(500).json({ success: false, message: "Server error", error: err.message });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+};
+
+
+const withdrawBalance = async(req, res) => {
+    try {
+        const { userId, amount } = req.body;
+        if (!userId || !amount || Number(amount) <= 0)
+            return res.status(400).json({ success: false, message: "Invalid userId or amount" });
+
+        const withdrawAmount = Number(amount);
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        if (user.walletBalance < withdrawAmount)
+            return res.status(400).json({ success: false, message: "Insufficient wallet balance" });
+
+        if (!user.accountNumber)
+            return res.status(400).json({ success: false, message: "User has no accountNumber" });
+
+
+        user.walletBalance -= withdrawAmount;
+        user.accountBalance = (user.accountBalance || 0) + withdrawAmount;
+
+
+        const withdrawTxId = "withdraw_" + Date.now();
+        const creditTxId = "account_credit_" + Date.now();
+
+        user.betsHistory.push({
+            betId: withdrawTxId,
+            type: "withdraw",
+            amount: -withdrawAmount,
+            wonAmount: 0,
+            timestamp: new Date(),
+        });
+
+        user.betsHistory.push({
+            betId: creditTxId,
+            type: "account_credit",
+            amount: withdrawAmount,
+            wonAmount: 0,
+            timestamp: new Date(),
+        });
+
+        await user.save();
+
+
+        const transaction = new Transaction({ userId, type: "withdraw", amount: withdrawAmount });
+        await transaction.save();
+
+        res.json({
+            success: true,
+            message: "Withdrawal successful",
+            walletBalance: user.walletBalance,
+            accountBalance: user.accountBalance,
+            accountNumber: user.accountNumber,
+            transaction,
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
     }
 };
 
@@ -65,55 +138,22 @@ const getWalletHistory = async(req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
+        const transactions = await Transaction.find({ userId }).sort({ date: -1 });
+
         res.json({
-            status: 200,
             success: true,
-            transactions: user.betsHistory.sort((a, b) => b.timestamp - a.timestamp),
+            message: "Wallet transaction history fetched",
+            betsHistory: user.betsHistory.sort((a, b) => b.timestamp - a.timestamp),
+            transactions,
         });
-    } catch (err) {
-        console.error("Get Wallet History Error:", err);
-        res.status(500).json({ success: false, message: "Server error", error: err.message });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
     }
 };
 
-
-const withdrawBalance = async(req, res) => {
-    try {
-        const { userId, amount } = req.body;
-
-        if (!userId) return res.status(400).json({ success: false, message: "userId required" });
-        if (!amount || isNaN(amount) || Number(amount) <= 0) {
-            return res.status(400).json({ success: false, message: "Invalid amount" });
-        }
-
-        const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-        if (user.walletBalance < Number(amount)) {
-            return res.status(400).json({ success: false, message: "Insufficient balance" });
-        }
-
-        user.walletBalance -= Number(amount);
-        user.betsHistory.push({
-            betId: "withdraw_" + Date.now(),
-            walletBalance: "withdraw",
-            amount: -Number(amount),
-            wonAmount: 0,
-            timestamp: new Date(),
-        });
-
-        await user.save();
-
-        res.json({
-            status: 200,
-            success: true,
-            message: "Withdrawal processed successfully",
-            walletBalance: user.walletBalance,
-        });
-    } catch (err) {
-        console.error("Withdraw Funds Error:", err);
-        res.status(500).json({ success: false, message: "Server error", error: err.message });
-    }
+module.exports = {
+    getWalletBalance,
+    addBalance,
+    withdrawBalance,
+    getWalletHistory,
 };
-
-module.exports = { getWalletBalance, addBalance, getWalletHistory, withdrawBalance };
